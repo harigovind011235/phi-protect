@@ -2,8 +2,6 @@
 # Only list files with deliberately FAKE patient data. Never list folders that can hold real data.
 # Takes effect only once committed; every change here must go through code review.
 tests/
-examples/
 evaluation/
 src/phi_protect/cli/self_test_sample.py
 README.md
-PROJECT_REVIEW.md

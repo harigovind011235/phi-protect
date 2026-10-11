@@ -1,179 +1,218 @@
 # PHI Protect
 
-Detects PHI in text before it is sent to AI tools, and returns a de-identified version.
+Catches patient information (PHI) in Claude Code before it reaches Claude, and gives you a
+de-identified version to send instead.
 
-The PHI detection service (this repo, step 1) combines:
-- Rules for structured identifiers: SSN, phone, email, labeled member/group/claim/MRN IDs, labeled dates (DOB, date of service), names after "patient"/"pt", Medicare MBI, street address (including lowercase and PO boxes), city/ZIP, and X12 address/date segments.
-- NER model [`StanfordAIMI/stanford-deidentifier-base`](https://huggingface.co/StanfordAIMI/stanford-deidentifier-base) (MIT) for names, dates and unlabeled IDs, run through Microsoft Presidio.
+- **Checks** every prompt you send and every file Claude reads.
+- **Flags, doesn't stop you:** likely PHI is held back with a de-identified version ready; on a false
+  alarm you proceed in one step.
+- **Stays on your machine:** the detection model runs locally, works offline after setup, and never logs
+  or sends your text.
 
-Known non-PHI (payer names, CDT codes, NPI/taxonomy values, provider names with a "Dr." title, versions) is filtered in `src/phi_protect/domain/policy/allowlist.py`. The allowlist only overrules the model's guesses; labeled identifiers such as `MRN: ...` are never allowlisted.
+## Requirements
 
-Everything runs locally. The model (pinned to a fixed revision) is downloaded once from Hugging Face and cached; text is never logged or sent anywhere, and validation errors never echo the submitted text. After the first run, start the service with `HF_HUB_OFFLINE=1` so it cannot reach Hugging Face at all. Presidio's email detector may still fetch the public domain-suffix list; it never sends scanned text.
+| | |
+|---|---|
+| Claude Code | Installed and logged in; 2.1.295 or later recommended |
+| System | Linux, WSL, Windows x64, or macOS 14+ on Apple Silicon (no Intel Macs) |
+| Resources | ~2.5 GB disk, ~1 GB memory |
+| Network | Internet for the first install only |
+| Tools | `git`; `uv` (step 1) |
 
-The code follows clean architecture (domain, use cases, adapters, handler); see [CLAUDE.md](CLAUDE.md) for the layers, conventions and how to add or swap an adapter.
+## Install
 
-## Getting started
+### 1. Install `uv`
 
-PHI Protect checks every prompt you send and every file Claude reads in Claude Code. If it finds
-patient information, it blocks it before anything reaches Claude and shows you a de-identified version.
-Everything runs on your machine.
+Skip if `uv --version` already works.
 
-**You need:** Claude Code installed and logged in (2.1.295 or later recommended), about 2.5 GB of free
-disk, about 1 GB of free memory, and internet access for the first install only. Supported: Linux,
-Windows (x64), WSL, and macOS on Apple Silicon with macOS 14 or later (PyTorch no longer ships builds
-for Intel Macs).
-
-**1. Install `uv`** (installs Python tools; skip if `uv --version` works):
-
-- macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- Windows (PowerShell): `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-
-Then open a new terminal.
-
-**2. Get the project and install the `phi-protect` command** (a few minutes the first time):
+macOS, Linux, WSL:
 
 ```bash
-git clone <repo-url> phi_protect
-uv tool install ./phi_protect
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-Check it worked with `phi-protect --help`. If the command is not found, run `uv tool update-shell` and
-open a new terminal.
+Windows (PowerShell):
 
-**3. Connect it to Claude Code** (about a minute the first time):
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Open a new terminal afterwards.
+
+### 2. Install the `phi-protect` command
+
+```bash
+git clone https://github.com/harigovind011235/phi-protect.git
+uv tool install ./phi-protect
+```
+
+Takes a few minutes. Check it with `phi-protect --help`. If the command is not found, run
+`uv tool update-shell` and open a new terminal.
+
+### 3. Connect it to Claude Code
 
 ```bash
 phi-protect setup
 ```
 
-This downloads the detection model, runs a self-test, adds the PHI Protect hooks to your Claude Code
-settings (`~/.claude/settings.json`, backed up first) for all projects, and starts the service in the
-background. If it suggests `claude update`, do that and run `phi-protect setup` again.
+This takes about a minute the first time. It:
 
-Setup covers Claude Code running in the same environment you ran it in. **WSL users:** Claude Code
-started on the Windows side (VS Code not connected to WSL, the desktop app) uses its own Windows
-settings. To cover it too, run this from WSL instead; Windows-side hooks then call your WSL install:
+1. downloads the detection model (~0.4 GB, once),
+2. runs a self-test,
+3. adds the PHI Protect hooks to `~/.claude/settings.json` for all projects (the old file is backed up
+   next to it),
+4. starts the PHI Protect service in the background.
+
+**WSL users:** Claude Code started on the Windows side (VS Code not connected to WSL, the desktop app)
+reads its own Windows settings. Cover it too by running this from WSL instead:
 
 ```bash
 phi-protect setup --windows
 ```
 
-Alternatively, open projects in VS Code connected to WSL (`code .` from a WSL terminal; the bottom-left
-corner shows "WSL"), so the extension runs inside WSL. On Windows without WSL, run the same commands in
-PowerShell; that path is not yet tested.
-
-**4. Check it is running:**
+### 4. Check it is running
 
 ```bash
 phi-protect status
 ```
 
-**5. Try it.** Open a new Claude Code session in any folder (`claude`, or a new session in the IDE
-extension or desktop app). The first message after a session starts can take about 10 seconds while the
-model loads. The `examples/` folder in this repo has fake files to test with:
+Expect `Service: running` and `Hooks for all projects: installed`.
 
-| In Claude Code | What happens |
+### 5. Try it
+
+Start a **new** Claude Code session in the cloned folder (hooks load when a session starts):
+
+```bash
+cd phi-protect && claude
+```
+
+The first message can take ~10 seconds while the model loads. All data in `examples/` is fake.
+
+| Type in Claude Code | Expected |
 |---|---|
-| `Draft an appeal for Maria Lopez, DOB 03/14/1985, member ID XGH884213901` | Blocked; you see a de-identified version to review and resend |
-| `Read examples/eob_with_phi.pdf and summarize it` | The read is blocked; Claude tells you why (types of PHI only, never the values) |
-| `Read examples/clean_benefits.pdf. What is the frequency limitation for D2740?` | Works normally |
-| `Read examples/scanned_page.pdf` | Blocked: images cannot be checked for PHI |
+| `Draft an appeal for Maria Lopez, DOB 03/14/1985, member ID XGH884213901` | Held back; a de-identified version is on your clipboard |
+| `Read examples/eob_with_phi.pdf and summarize it` | Permission dialog listing the PHI types found |
+| `Read examples/clean_benefits.pdf. What is the frequency limit for D2740?` | Works normally |
+| `Read examples/scanned_page.pdf` | Permission dialog: images cannot be checked |
 
-### Everyday use
+## Everyday use
 
-PHI Protect is a helper: it flags likely patient information and you decide.
+**A prompt was flagged.** Nothing was sent. Pick one:
 
-- **A prompt was flagged:** it was held back, and you choose:
-  - **Send a de-identified version:** it is already on your clipboard (Windows, macOS, WSL; Linux needs
-    `wl-copy` or `xclip`). Paste it, check it, send it.
-  - **It is a false alarm, send the original:** copy it again and send it within 5 minutes. The same
-    patient data sent again goes through as-is (the surrounding text may differ). Only a salted
-    fingerprint is kept, never the data, and it works once.
-  - **Skip the check up front:** put `[phi-ok]` anywhere in a prompt and it is sent without checking.
-- **A file read was flagged:** Claude Code asks for permission. Allow it if it is a false alarm; otherwise
-  deny and make a de-identified copy with `phi-protect deidentify path/to/file.pdf`.
-- **"PHI Protect could not check …":** the service is not running or failed; your work continues with a
-  warning. Run `phi-protect status`, then `phi-protect start`; the log is in `~/.phi-protect/service.log`
-  (it never contains your text).
-- **Enforcing instead of helping (later):** set `PHI_MODE=block` (e.g. in the `env` section of the Claude
-  Code settings) and re-run `phi-protect setup`. Then PHI, and anything that cannot be checked, is blocked.
-- **A repo has test fixtures with fake patients:** list those paths in a `.phi-protect-ignore` file at the
-  repo root (one pattern per line, e.g. `tests/fixtures/`). Reads of listed files are not checked; prompts
-  always are. It only takes effect once committed to git and unchanged, so every exception is reviewed.
-  Never list folders that can hold real data. Patterns that match everything (`*`) are rejected.
-- **Update to a new version:** `git pull` in the project folder, then `uv tool install --reinstall ./phi_protect`
-  and `phi-protect setup`.
-- **Remove it:** `phi-protect uninstall` (add `--windows` if you set it up that way; removes only the PHI
-  Protect hooks and stops the service), then `uv tool uninstall phi-protect`.
+- **Send the de-identified version:** it is already on your clipboard. Paste, check, send.
+- **Send the original (false alarm):** copy it again and send it within 5 minutes. The same patient data
+  sent again goes through once.
+- **Skip the check:** put `[phi-ok]` anywhere in the prompt.
 
-### What it does not cover yet
-
-Shell command output (e.g. `cat claims.csv`), Grep results, database/MCP tool results, pasted images,
-and `@file` mentions in prompts. Each check adds about a second to a prompt or file read; large PDFs take
-longer. Tested on Linux (WSL), including Windows-side hooks bridged into WSL through `cmd` and
-PowerShell; native macOS and native Windows installs are not yet tested.
-
-## Run the service directly
+**A file read was flagged.** Claude Code asks for permission. Allow it on a false alarm; otherwise deny,
+then create a de-identified copy (PDF or text) and use that:
 
 ```bash
-uv sync
-uv run python -m phi_protect.main
+phi-protect deidentify path/to/file.pdf
 ```
 
-The service listens on `127.0.0.1:8765` only.
+**"PHI Protect could not check …"** means the service is down; your work continues with this warning.
+Run `phi-protect status`, then `phi-protect start`. The log, which never contains your text, is
+`~/.phi-protect/service.log`.
+
+**A repo has test fixtures with fake patients.** List those paths in a `.phi-protect-ignore` file at the
+repo root, one pattern per line:
+
+```
+# Only files with FAKE patient data.
+tests/fixtures/
+samples/*.csv
+```
+
+Reads of matching files are no longer checked; prompts always are. The file only takes effect once
+committed to git and unchanged, so every exception is reviewed. `*`, `**`, absolute paths and `..` are
+rejected.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `phi-protect setup` | Download the model, add the hooks, start the service. `--windows`: also cover Windows-side Claude Code (run from WSL). `--project DIR`: one project only |
+| `phi-protect status` | Show the service state and where hooks are installed |
+| `phi-protect start` / `stop` | Start or stop the background service (it also starts with each Claude Code session) |
+| `phi-protect deidentify FILE [-o OUT]` | Write a de-identified copy of a PDF or text file |
+| `phi-protect uninstall` | Remove only the PHI Protect hooks and stop the service; add `--windows` / `--project DIR` to match setup |
+| `phi-protect serve` | Run the service in the foreground (debugging) |
+
+**Update:**
 
 ```bash
-curl -s localhost:8765/scan -H 'content-type: application/json' \
-  -d '{"text": "Appeal for Maria Lopez, member ID XGH884213901"}'
+cd phi-protect && git pull && uv tool install --reinstall . && phi-protect setup
 ```
 
-Response:
-
-```json
-{"has_phi": true, "entities": [...], "deidentified_text": "Appeal for [PERSON_1], member ID [MEMBER_ID_1]"}
-```
-
-`has_phi` is true when anything other than an unlabeled date is found. Unlabeled dates (`DATE_TIME`) are replaced but do not block on their own; labeled patient dates (`PATIENT_DATE`, e.g. `DOB: ...`) do block.
-
-`deidentified_text` is a suggestion for the user to review, not something to forward automatically: detection can miss values.
-
-### Files
+**Remove completely:**
 
 ```bash
-curl -s localhost:8765/scan-file -F "file=@eob.pdf"
-# {"decision": "block", "file_type": "pdf", "reason": null, "entity_counts": {"PERSON": 1, "MEMBER_ID": 1}}
-
-curl -s localhost:8765/deidentify-file -F "file=@eob.pdf" -o deidentified.pdf
+phi-protect uninstall && uv tool uninstall phi-protect
 ```
 
-`decision` is `allow`, `block` or `cannot_verify`. Supported: PDFs with a text layer and any plain-text file (CSV, JSON, logs, X12, code). The file type is detected from the content, not the name.
+## What it checks
 
-`cannot_verify` (with a `reason`) is returned instead of guessing for: scanned pages or large images (x-rays, screenshots), fillable forms, comments/annotations, encrypted or damaged PDFs, other binary formats (Word, Excel, images), files over 25 MB, PDFs over 50 pages, and more than 50,000 characters of text. Connectors should treat it as a block.
+- **Detects:** names, dates of birth and service, SSN, phone, email, street address, PO box, city, ZIP,
+  member/subscriber, group, claim, MRN/account and Medicare IDs, and patient fields in X12 files
+  (837, 835, 270/271).
+- **Leaves alone:** dentist names with "Dr.", NPI/TIN, payer names, CDT codes, amounts, versions, hashes,
+  usernames in file paths, and AI tool names such as Claude.
+- **Cannot check, so always asks:** scanned pages and images, fillable or annotated PDFs, encrypted
+  PDFs, Word/Excel files, and files over 25 MB, 50 pages or 50,000 characters.
+- **Not covered yet:** shell command output (e.g. `cat claims.csv`), Grep results, MCP/database tool
+  results, pasted images, and `@file` mentions.
+- **Speed:** about a second per prompt or file; a 10-page PDF takes ~10 seconds.
 
-The de-identified PDF is rebuilt from page images with labeled black boxes, so it has no text layer and redacted text cannot be recovered from it. The download is always named `deidentified.pdf`/`.txt`, because original file names can contain PHI.
+## Configuration
 
-Speed: the NER model reads about 3,500 characters per second on CPU, so a 10-page PDF takes around 10 seconds.
+Set as environment variables. For the hooks, put them in the `env` section of the Claude Code settings
+file, then re-run `phi-protect setup`.
 
-Settings (environment variables): `PHI_NER_MODEL`, `PHI_NER_MODEL_REVISION`, `PHI_SCORE_THRESHOLD` (default 0.5, must be between 0 and 1; applies to model findings), `PHI_MAX_CONCURRENT_SCANS` (default 1), `PHI_MAX_FILE_BYTES`, `PHI_MAX_FILE_TEXT_CHARS`, `PHI_MAX_PDF_PAGES`.
+| Variable | Default | Meaning |
+|---|---|---|
+| `PHI_MODE` | `warn` | `warn`: flag and let the user decide. `block`: enforce; PHI and anything uncheckable is blocked, and resends and `[phi-ok]` are ignored |
+| `PHI_SERVICE_URL` | local service | Where the hooks reach the service, e.g. a shared on-prem server |
+| `PHI_HOST`, `PHI_PORT` | `127.0.0.1`, `8765` | Where the service listens |
+| `PHI_SCORE_THRESHOLD` | `0.5` | Minimum model confidence (0–1); rule-based detection always applies |
+| `PHI_MAX_CONCURRENT_SCANS` | `1` | Model scans run at the same time |
+| `PHI_MAX_FILE_BYTES`, `PHI_MAX_FILE_TEXT_CHARS`, `PHI_MAX_PDF_PAGES` | 25 MB, 50,000, 50 | File limits |
 
-## Measure accuracy
+Tested on Linux and WSL, including Windows-side hooks bridged into WSL through `cmd` and PowerShell.
+Native macOS and Windows installs are not yet tested.
 
-The test set is synthetic (Faker). Never add real PHI to it.
+## Development
+
+Architecture, layers and conventions are in [CLAUDE.md](CLAUDE.md).
 
 ```bash
-uv run python -m evaluation.generate
-uv run python -m evaluation.evaluate
+uv sync                              # install dependencies
+uv run python -m phi_protect.main    # run the service on 127.0.0.1:8765
 ```
 
-A PHI value only counts as removed if every character of it is redacted. The report also shows how many PHI prompts still contain PHI after redaction, and how much harmless text was redacted.
+**HTTP API** (used by the hooks; all processing is local):
 
-Held-out set: the team writes realistic fake prompts in `evaluation/data/holdout.txt` (format and rules in `evaluation/holdout_template.txt`). It is for go/no-go checks only; never tune the detector against it.
+| Endpoint | Input | Returns |
+|---|---|---|
+| `POST /scan` | JSON `{"text": "..."}` | `has_phi`, detected entities, `deidentified_text` |
+| `POST /scan-file` | multipart `file` | `decision` (`allow` / `block` / `cannot_verify`), `reason`, `entity_counts` |
+| `POST /deidentify-file` | multipart `file` | De-identified PDF or text; 422 with `reason` if it cannot be checked |
+| `GET /health` | | `{"status": "ok"}` |
+
+De-identified PDFs are rebuilt from page images with labeled black boxes, so no redacted text can be
+recovered. Downloads are always named `deidentified.*` because file names can contain PHI.
+
+**Accuracy** is measured on synthetic data only (never add real PHI):
 
 ```bash
-uv run python -m evaluation.evaluate evaluation/data/holdout.txt
+uv run python -m evaluation.evaluate                                 # synthetic set
+uv run python -m evaluation.evaluate evaluation/data/holdout.txt     # team-written held-out set
 ```
 
-## Quality gates
+To build the held-out set, copy `evaluation/holdout_template.txt` to `evaluation/data/holdout.txt` and
+follow its instructions. Use it for go/no-go checks only; never tune against it.
+
+**Quality gates** (run all before a change is done):
 
 ```bash
 uv run ruff check .
