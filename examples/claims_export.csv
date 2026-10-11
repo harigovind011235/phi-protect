@@ -1,0 +1,3 @@
+patient_name,dob,member_id,claim_no,cdt_code,status
+Maria Lopez,03/14/1985,XGH884213901,884213901223,D2740,DENIED
+Kevin Ng,1991-06-22,W884213901,553035283522,D1110,PAID

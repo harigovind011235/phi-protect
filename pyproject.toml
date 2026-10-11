@@ -1,0 +1,65 @@
+[project]
+name = "phi-protect"
+version = "0.1.0"
+description = "Detects and removes PHI before text or files are sent to AI tools."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "en-core-web-sm",
+    "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "pillow>=12.3.0",
+    "presidio-analyzer[transformers]>=2.2.364",
+    "pydantic-settings>=2.15.0",
+    "pypdfium2>=5.14.0",
+    "python-multipart>=0.0.32",
+    "torch>=2.14.1",
+    "transformers>=4.57.6",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[project.scripts]
+phi-protect = "phi_protect.cli.main:main"
+
+[dependency-groups]
+dev = [
+    "faker>=40.43.0",
+    "pyrefly>=1.3.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "reportlab>=5.0.1",
+    "ruff>=0.17.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.3,<0.10"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"evaluation/generate.py" = ["E501"]  # prompt templates are long by nature
+
+[tool.pyrefly]
+project-includes = ["src", "tests", "evaluation"]
+search-path = ["src", "."]
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

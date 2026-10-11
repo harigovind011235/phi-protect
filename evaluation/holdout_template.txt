@@ -1,0 +1,52 @@
+PHI Protect: held-out test set
+==============================
+
+Copy this file to evaluation/data/holdout.txt and replace the example prompts below with your own.
+
+RULES
+1. NEVER use real patient data. Invent every name, date and number. Do not take a real record and
+   change a few characters. Make it up from scratch, but in the exact format you see at work.
+2. Mark every value that must never reach an AI tool like this: {{phi:Maria Lopez}}
+   Mark: patient / subscriber / guarantor names, DOB, dates of service, member / subscriber / group /
+   claim / MRN / account numbers, SSN, Medicare ID, phone, email, street address, city, ZIP.
+   Do NOT mark: dentist / provider names, practice names, payer names, NPI, TIN, CDT codes,
+   dollar amounts, release dates, code identifiers like patient_id.
+3. A prompt with no markers is a "clean" prompt. Aim for about 40% clean prompts, and make them look
+   risky on purpose (SQL on patient tables, code with patient fields, EOB questions). They measure
+   false alarms.
+4. Put a line containing only --- between prompts. Prompts can span many lines.
+5. Write what you would really paste into Claude / ChatGPT. Mix in:
+   chat questions, JSON, CSV rows, logs and stack traces, SQL results, X12 837D / 835 / 270 / 271,
+   EOB and denial text, emails and call notes, code with test fixtures, lowercase and typos,
+   first names only, short names (Le, Ng, Wu).
+6. Target 50 to 100 prompts. Different people writing them is better than one person writing all.
+
+HOW IT IS USED
+This set is for go / no-go checks only. Nobody tunes the detector while looking at it. When it finds
+a problem, the fix gets its own regression test, and the set is refreshed with new prompts.
+
+Run it with:
+    uv run python -m evaluation.evaluate evaluation/data/holdout.txt
+
+Everything above the first --- line is ignored.
+---
+can you draft an appeal for {{phi:Maria Lopez}}, dob {{phi:03/14/1985}}, sub id {{phi:XGH884213901}}? delta denied D2740 on #14 as not medically necessary
+---
+{"subscriberFirstName": "{{phi:Kevin}}", "subscriberLastName": "{{phi:Ng}}", "memberId": "{{phi:W884213901}}", "groupNumber": "{{phi:00451122}}", "payer": "MetLife"}
+---
+2026-10-02 14:03:11 ERROR EligibilityJob - 271 rejected for {{phi:ana wu}} ({{phi:00294417201}}): AAA*N**72*C
+---
+NM1*IL*1*{{phi:PATEL}}*{{phi:ROHAN}}****MI*{{phi:884213901}}~
+N3*{{phi:1420 W PECAN BLVD APT 6}}~
+N4*{{phi:AUSTIN}}*TX*{{phi:78745}}~
+DMG*D8*{{phi:19910622}}*M~
+why is the 837D bouncing with a 999 error on the loop above?
+---
+SELECT p.patient_id, p.first_name, p.dob, c.claim_status FROM patients p JOIN claims c ON c.patient_id = p.patient_id WHERE c.payer_id = 'DDCA1' AND c.status = 'DENIED';
+---
+Dr. Alvarez wants to know if Guardian covers D4341 twice a year for perio patients. Our NPI is 1932104858.
+---
+Write a pytest fixture that builds a fake Patient with a random member_id and dob using Faker.
+---
+What does CARC 45 with RARC N381 mean on an 835 and how should we post it?
+---
